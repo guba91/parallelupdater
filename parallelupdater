@@ -53,7 +53,10 @@ if [ -s hosttoupdate.txt ]; then
 
     #creating a string with a line for every row of the array
     elenco=$( IFS=$'\n'; echo "${my_array[*]}" )
-
+    
+    # Include the selected hostname in the "Available Update" screen
+    elenco="Host: $container\n\n$elenco"
+    
     if (whiptail --title "Available Update" --yesno "$elenco" 20 120 --scrolltext 3>&1 1>&2 2>&3); then
       ssh -t root@${container} screen 'apt upgrade -y'
     fi
