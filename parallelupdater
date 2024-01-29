@@ -6,30 +6,32 @@ mkdir /root/.ssh
 touch /root/.ssh/known_hosts
 touch hosttoupdate.txt
 
-#let's find out if it was a rerun or a new run
+#let's find out if it was a re-run or a new run
 if [[ $1 != "again" ]]; then
     cat /etc/hosts | awk '{print $2}' | sed -e '1,6d' > ./hosts_name
     while read arg; do ssh-keyscan -H $arg >> ~/.ssh/known_hosts; done < ./hosts_name
 
     whiptail --title "Updating" --infobox "Please wait, apt update of every host." 8 78
-    # manda comando update a tutti nella lista hosts_name
+    # send apt update to every hosts in  hosts_name
     parallel-ssh -h hosts_name "apt update > /dev/null 2>&1" > /dev/null 2>&1
 fi
 
 
-#echo "creazione lista aggiornamenti"
+echo "Creating list of available updates"
 whiptail --title "Updating list" --infobox "Please wait, refreshing list" 8 78
-# list upgradable salvata su aggiornamenti.txt
+
+echo "creating updateavailable.txt with upgradable packegs"
 unbuffer parallel-ssh --inline-stdout -h hosts_name "apt list --upgradable | grep -e SUCCESS -e upgradable" | grep -e SUCCESS -e upgradable --color=auto > updateavailable.txt
 
+echo "creating upgradable hosts list"
 whiptail --title "Updating list" --infobox "Please wait, creating upgradable hosts list" 8 78
-#echo "creazione lista server da aggiornare"
-# crea il file aggiornabili.txt con la lista dei server da poter aggiornare
+
+echo "create hosttoupdate.txt with hosts to update"
 cat updateavailable.txt | grep SUCCESS --color=auto | awk '{print $NF}' > hosttoupdate.txt
 
 whiptail --title "Updating list" --infobox "Please wait, creating array" 8 78
-#echo "creazione array"
-# creo array con lista server da aggiornare
+echo "please wait, creating an array with the hosts to update"
+
 arr=()
 while IFS= read -r line; do
    arr+=("$line")
@@ -43,20 +45,20 @@ if [ -s hosttoupdate.txt ]; then
   container=$(whiptail --title "What to update" --menu "Choose an option" 25 78 16 "${arr[@]}" 3>&1 1>&2 2>&3)
 
   if ! [ -z "${container}" ]; then #if container is selected
-    # per il server selezionato creo la lista di pacchetti aggiornabili
+    # creating the list of packages to update for the selected host
     mapfile -t my_array < <( parallel-ssh --inline-stdout -H $container "apt list --upgradable | grep upgradable" )
 
-    #tolgo la prima riga che contiene il nome del container selezionato
+    #remove the first line, contain the name of the container
     my_array=("${my_array[@]:1}")
 
-    #trasformo l'array in stringa con accapo
+    #creating a string with a line for every row of the array
     elenco=$( IFS=$'\n'; echo "${my_array[*]}" )
 
     if (whiptail --title "Available Update" --yesno "$elenco" 20 120 --scrolltext 3>&1 1>&2 2>&3); then
       ssh -t root@${container} screen 'apt upgrade -y'
     fi
   fi #end if container selected
-  if (whiptail --title "What now?" --yesno "Ricomincia?" 20 120 --scrolltext 3>&1 1>&2 2>&3); then
+  if (whiptail --title "What now?" --yesno "Restart?" 20 120 --scrolltext 3>&1 1>&2 2>&3); then
     bash parallelupdater again
   fi
 
