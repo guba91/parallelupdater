@@ -10,7 +10,7 @@ to run:
 ```
 docker run -it -v ./id_rsa:/root/.ssh/id_rsa --add-host host2:192.168.5.2 parallelupdater:0.1
 ```
- or with compose:
+ or with compose: (but doesn't work with compose.. don't show whiptail)
 ```
 version: "3.8"
 services:
