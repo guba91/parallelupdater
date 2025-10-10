@@ -1,5 +1,7 @@
 #!/bin/bash
 
+cat /root/my_hosts >> /etc/hosts
+
 touch updateavailable.txt
 touch hosttoupdate.txt
 mkdir /root/.ssh
@@ -8,7 +10,8 @@ touch hosttoupdate.txt
 
 #let's find out if it was a re-run or a new run
 if [[ $1 != "again" ]]; then
-    cat /etc/hosts | awk '{print $2}' | sed -e '1,6d' > ./hosts_name
+    #cat /etc/hosts | awk '{print $2}' | sed -e '1,6d' > ./hosts_name
+    cat /root/my_hosts | awk '{print $2}' > ./hosts_name
     while read arg; do ssh-keyscan -H $arg >> ~/.ssh/known_hosts; done < ./hosts_name
 
     whiptail --title "Updating" --infobox "Please wait, apt update of every host." 8 78
