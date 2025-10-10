@@ -6,7 +6,9 @@ touch ./ggupdate/aggiornabili.txt
 
 
 cat /root/my_hosts | awk '{print $2}' | sed -e '1,7d' > ./ggupdate/hosts_name
-while read arg; do ssh-keyscan -H $arg >> ~/.ssh/known_hosts; done < ./ggupdate/hosts_name
+{
+   while read arg; do ssh-keyscan -H $arg >> ~/.ssh/known_hosts; done < ./ggupdate/hosts_name
+} | whiptail --title "ssh-keyscan" --gauge "Please wait while populating known_hosts." 8 78 0
     
 #let's find out if it was a rerun or a new run
 if [[ $1 != "again" ]]; then
@@ -47,7 +49,7 @@ unbuffer parallel-ssh --inline-stdout -h ./ggupdate/hosts_name "apt list --upgra
 
 cat ./ggupdate/aggiornamenti.txt | grep SUCCESS --color=auto | awk '{print $NF}' > ./ggupdate/aggiornabili.txt
 
-whiptail --title "Updating list" --infobox "Please wait, creating array" 8 78
+
 # creating array with servers that can be update
 
 arr=()
