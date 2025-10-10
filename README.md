@@ -20,7 +20,6 @@ cd parallelupdater && docker build -t parallelupdater:0.1 . && cd ..
 
 Populate "myhosts" with standard hosts syntax:
 ```
-#ip hostname
 192.168.5.10 testvm
 192.168.5.11 testlxc
 ```
