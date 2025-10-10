@@ -10,7 +10,7 @@ while read arg; do ssh-keyscan -H $arg >> ~/.ssh/known_hosts; done < ./ggupdate/
     
 #let's find out if it was a rerun or a new run
 if [[ $1 != "again" ]]; then
-  if [[ $(find ./ggupdate/whenupdated -mmin +60 -print) ]]; then
+  if [[ ! -e ./ggupdate/whenupdated || $(find ./ggupdate/whenupdated -mmin +60 -print) ]]; then
     # echo "last update not in an hour, let me update everything"
     #whiptail --title "Updating" --infobox "Please wait, apt update of every host." 8 78
     # send apt update on every hosts in "hosts_name"
