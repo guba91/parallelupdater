@@ -5,28 +5,24 @@ You need to provide the private key and the list of debian and ubuntu os or lxc 
 Then the script uses pssh and whiptail to ask you what to update.
 
 to build:
-```docker build -t parallelupdater:0.1 .```
+```docker build -t parallelupdater:0.1 .  ```
 
 to run:
 ```
 docker run -it -v ./id_rsa:/root/.ssh/id_rsa --add-host host2:192.168.5.2 parallelupdater:0.1
 ```
- or with compose: (but doesn't work with compose.. don't show whiptail)
+
+
+Example usage:
+```git clone https://github.com/guba91/parallelupdater```
+Populate "myhosts" with standard hosts syntax:
 ```
-version: "3.8"
-services:
-  parallelupdater:
-    container_name: parallelupdater
-    image: parallelupdater:0.1
-    restart: unless-stopped
-    extra_hosts:
-      host2: 192.168.5.2
-      host3: 192.168.5.3
-      host4: 192.168.5.4
-    tty: true
-    stdin_open: true
-    environment:
-      - TERM=xterm
-    volumes:
-      - ./id_rsa:/root/.ssh/id_rsa
+#ip hostname
+192.168.5.10 testvm
+192.168.5.11 testlxc
 ```
+Be sure to have your public key on every host you plan to update
+
+```docker run -it --mount type=bind,source="$(pwd)/.ssh/id_rsa",target=/root/.ssh/id_rsa  -v ./my_hosts:/root/my_hosts parallelupdater:0.1```
+
+Be sure to change the file path in "$(pwd)/.ssh/id_rsa" with the path of your private key
