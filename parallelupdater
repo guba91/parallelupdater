@@ -14,9 +14,14 @@ if [[ $1 != "again" ]]; then
     cat /root/my_hosts | awk '{print $2}' > ./hosts_name
     while read arg; do ssh-keyscan -H $arg >> ~/.ssh/known_hosts; done < ./hosts_name
 
-    whiptail --title "Updating" --infobox "Please wait, apt update of every host." 8 78
+    # whiptail --title "Updating" --infobox "Please wait, apt update of every host." 8 78
     # send apt update to every hosts in  hosts_name
-    parallel-ssh -h hosts_name "apt update > /dev/null 2>&1" > /dev/null 2>&1
+    # parallel-ssh -h hosts_name "apt update > /dev/null 2>&1" > /dev/null 2>&1
+    {
+       parallel-ssh -h hosts_name "apt update > /dev/null 2>&1" > /dev/null 2>&1
+    } | whiptail --title "Updating" --gauge "Please wait, apt update of every host." 8 78 0
+
+
 fi
 
 
