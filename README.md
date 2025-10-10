@@ -14,7 +14,10 @@ docker run -it -v ./id_rsa:/root/.ssh/id_rsa --add-host host2:192.168.5.2 parall
 
 
 Example usage:
-```git clone https://github.com/guba91/parallelupdater```
+```git clone https://github.com/guba91/parallelupdater
+cd parallelupdater && docker build -t parallelupdater:0.1 . && cd ..
+```
+
 Populate "myhosts" with standard hosts syntax:
 ```
 #ip hostname
