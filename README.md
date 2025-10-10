@@ -1,7 +1,8 @@
 A little experiment.
-This project aim to update with apt update and upgrade every host you specify in the extra_hosts section. It works with debian-based distro.
+This project aim to update with apt update and upgrade every host you specify in the extra_hosts section. 
+It works with debian-based distro.
 You need to provide the private key and the list of debian and ubuntu os or lxc container to update.
-Then the script uses parallel-ssh and whiptail to ask you what to update.
+Then the script uses pssh and whiptail to ask you what to update.
 
 to build:
 ```docker build -t parallelupdater:0.1 .```
