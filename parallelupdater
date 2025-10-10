@@ -4,7 +4,7 @@ cat /root/my_hosts >> /etc/hosts
 
 touch updateavailable.txt
 touch hosttoupdate.txt
-mkdir /root/.ssh
+mkdir /root/.ssh -p
 touch /root/.ssh/known_hosts
 touch hosttoupdate.txt
 
