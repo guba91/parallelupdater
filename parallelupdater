@@ -1,75 +1,82 @@
 #!/bin/bash
 
-cat /root/my_hosts >> /etc/hosts
+mkdir -p ./ggupdate
+touch ./ggupdate/aggiornamenti.txt
+touch ./ggupdate/aggiornabili.txt
 
-touch updateavailable.txt
-touch hosttoupdate.txt
-mkdir /root/.ssh -p
-touch /root/.ssh/known_hosts
-touch hosttoupdate.txt
 
-#let's find out if it was a re-run or a new run
+cat /root/my_hosts | awk '{print $2}' | sed -e '1,7d' > ./ggupdate/hosts_name
+while read arg; do ssh-keyscan -H $arg >> ~/.ssh/known_hosts; done < ./ggupdate/hosts_name
+    
+#let's find out if it was a rerun or a new run
 if [[ $1 != "again" ]]; then
-    #cat /etc/hosts | awk '{print $2}' | sed -e '1,6d' > ./hosts_name
-    cat /root/my_hosts | awk '{print $2}' > ./hosts_name
-    while read arg; do ssh-keyscan -H $arg >> ~/.ssh/known_hosts; done < ./hosts_name
-
-    # whiptail --title "Updating" --infobox "Please wait, apt update of every host." 8 78
-    # send apt update to every hosts in  hosts_name
-    # parallel-ssh -h hosts_name "apt update > /dev/null 2>&1" > /dev/null 2>&1
+  if [[ $(find ./ggupdate/whenupdated -mmin +60 -print) ]]; then
+    # echo "last update not in an hour, let me update everything"
+    #whiptail --title "Updating" --infobox "Please wait, apt update of every host." 8 78
+    # send apt update on every hosts in "hosts_name"
     {
-       parallel-ssh -h hosts_name "apt update > /dev/null 2>&1" > /dev/null 2>&1
+    parallel-ssh -h ./ggupdate/hosts_name "apt update > /dev/null 2>&1" > /dev/null 2>&1
     } | whiptail --title "Updating" --gauge "Please wait, apt update of every host." 8 78 0
-
-
+    
+    # touch the file to know when this happened
+    touch ./ggupdate/whenupdated
+  else
+    # last update less than 1 hour ago
+    if (whiptail --title "Updating" --yesno "No apt update needed, last in the previous hour.\nDo it anyway?" 20 120 --scrolltext 3>&1 1>&2 2>&3); then
+      whiptail --title "Updating" --infobox "Please wait, apt update of every host." 8 78
+      {
+        parallel-ssh -h ./ggupdate/hosts_name "apt update > /dev/null 2>&1" > /dev/null 2>&1
+      } | whiptail --title "Updating" --gauge "Please wait, apt update of every host." 8 78 0
+      touch ./ggupdate/whenupdated
+    fi
+  fi
 fi
 
 
-echo "Creating list of available updates"
-whiptail --title "Updating list" --infobox "Please wait, refreshing list" 8 78
 
-echo "creating updateavailable.txt with upgradable packegs"
-unbuffer parallel-ssh --inline-stdout -h hosts_name "apt list --upgradable | grep -e SUCCESS -e upgradable" | grep -e SUCCESS -e upgradable --color=auto > updateavailable.txt
 
-echo "creating upgradable hosts list"
-whiptail --title "Updating list" --infobox "Please wait, creating upgradable hosts list" 8 78
+{
+unbuffer parallel-ssh --inline-stdout -h ./ggupdate/hosts_name "apt list --upgradable | grep -e SUCCESS -e upgradable" | grep -e SUCCESS -e upgradable --color=auto > ./ggupdate/aggiornamenti.txt
+} | whiptail --title "Updating List" --gauge "Please wait, refreshing list" 8 78 0
 
-echo "create hosttoupdate.txt with hosts to update"
-cat updateavailable.txt | grep SUCCESS --color=auto | awk '{print $NF}' > hosttoupdate.txt
+
+#whiptail --title "Updating list" --infobox "Please wait, creating upgradable hosts list" 8 78
+
+# creating the list of the hosts that can be update
+# create file aggiornabili.txt with the list of the servers that can be update
+
+cat ./ggupdate/aggiornamenti.txt | grep SUCCESS --color=auto | awk '{print $NF}' > ./ggupdate/aggiornabili.txt
 
 whiptail --title "Updating list" --infobox "Please wait, creating array" 8 78
-echo "please wait, creating an array with the hosts to update"
+# creating array with servers that can be update
 
 arr=()
 while IFS= read -r line; do
    arr+=("$line")
    arr+=("")
-done <hosttoupdate.txt
+done <./ggupdate/aggiornabili.txt
 
-if [ -s hosttoupdate.txt ]; then
-  # The file is not-empty, so there is at least 1 container to update
+if [ -s ./ggupdate/aggiornabili.txt ]; then
+  # The file is not-empty, so there is at least 1 host to update
 
-  #select a container to update
-  container=$(whiptail --title "What to update" --menu "Choose an option" 25 78 16 "${arr[@]}" 3>&1 1>&2 2>&3)
+  #select a host to update
+  thathost=$(whiptail --title "What to update" --menu "Choose an option" 25 78 16 "${arr[@]}" 3>&1 1>&2 2>&3)
 
-  if ! [ -z "${container}" ]; then #if container is selected
-    # creating the list of packages to update for the selected host
-    mapfile -t my_array < <( parallel-ssh --inline-stdout -H $container "apt list --upgradable | grep upgradable" )
+  if ! [ -z "${thathost}" ]; then #if thathost is selected
+    # create the list of packages to be updated for the selected hosts
+    mapfile -t my_array < <( parallel-ssh --inline-stdout -H $thathost "apt list --upgradable | grep upgradable" )
 
-    #remove the first line, contain the name of the container
+    # remove the first line that contain the hostname of the selected hosts
     my_array=("${my_array[@]:1}")
 
-    #creating a string with a line for every row of the array
-    elenco=$( IFS=$'\n'; echo "${my_array[*]}" )
-    
-    # Include the selected hostname in the "Available Update" screen
-    elenco="Host: $container\n\n$elenco"
-    
-    if (whiptail --title "Available Update" --yesno "$elenco" 20 120 --scrolltext 3>&1 1>&2 2>&3); then
-      ssh -t root@${container} screen 'apt upgrade -y'
+    # create a string with CR from the array
+    list=$( IFS=$'\n'; echo "${my_array[*]}" )
+
+    if (whiptail --title "Available Update" --yesno "$list" 20 120 --scrolltext 3>&1 1>&2 2>&3); then
+      ssh -t root@${thathost} screen 'apt upgrade -y'
     fi
-  fi #end if container selected
-  if (whiptail --title "What now?" --yesno "Restart?" 20 120 --scrolltext 3>&1 1>&2 2>&3); then
+  fi
+  if (whiptail --title "What now?" --yesno "Star Over?" 20 120 --scrolltext 3>&1 1>&2 2>&3); then
     bash parallelupdater again
   fi
 
