@@ -1,5 +1,5 @@
 A little experiment.
-This project aim to update with apt update and upgrade every host listed in HOSTS in your .env. 
+This project aim to update with apt update and upgrade every host in your ssh config. 
 It works with debian-based distro.
 You need to provide the private key and the list of debian and ubuntu os or lxc container to update.
 Then the script uses pssh and whiptail to ask you what to update.
@@ -8,10 +8,12 @@ Then the script uses pssh and whiptail to ask you what to update.
 ```
 git clone https://github.com/guba91/parallelupdater
 cd parallelupdater
-cp .env.example .env    # then put your hosts in HOSTS
+cp .env.example .env    # set SSH_DIR (default ~/.ssh)
 ```
-Hosts are resolved through your `~/.ssh/config` (HostName, User, IdentityFile...), so `HOSTS`
-can be just names. Use `name=ip` for hosts that are not in your ssh config.
+Every `Host` alias in `$SSH_DIR/config` (and its `Include` files) is a host to update;
+wildcard patterns like `Host *` are skipped. Users, keys, ports, ProxyJump etc. are taken
+from the ssh config, so that's the only place to edit. Hosts you never want to touch go
+in `EXCLUDE` in `.env`. Aliases pointing to the same user@host:port are updated once.
 Make sure your public key is on every host.
 
 ## Run

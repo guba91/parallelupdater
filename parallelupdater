@@ -1,42 +1,79 @@
 #!/bin/bash
 # parallelupdater - apt update/upgrade many Debian/Ubuntu hosts via parallel-ssh + whiptail
 #
-# Configuration comes from environment variables (see .env.example):
-#   HOSTS                 whitespace/newline separated list. "name" is resolved via ssh config,
-#                         "name=ip" is added to the container's /etc/hosts.
+# Hosts come from the ssh config mounted at /root/.ssh (every concrete "Host" alias,
+# Include files followed, wildcard patterns skipped). Users, keys, ports, ProxyJump...
+# are all taken from there.
+#
+# Optional environment variables (see .env.example):
+#   EXCLUDE               aliases never to update, space separated
 #   APT_UPDATE_MAX_AGE    minutes before a new "apt update" is run automatically (default 60)
 #   CONNECT_TIMEOUT       ssh connect timeout in seconds (default 5)
 #   UPGRADE_CMD           command run on the chosen host (default "apt-get upgrade -y")
-# Mounts: /root/.ssh (ssh config + key, read-only), /data (persistent state).
+# Persistent state lives in /data.
 
 STATE=${STATE:-/data}
+SSH_DIR=/root/.ssh
 APT_UPDATE_MAX_AGE=${APT_UPDATE_MAX_AGE:-60}
 CONNECT_TIMEOUT=${CONNECT_TIMEOUT:-5}
 UPGRADE_CMD=${UPGRADE_CMD:-apt-get upgrade -y}
 HOSTFILE="$STATE/hosts_name"
+SSHCFG="$STATE/ssh_config"
 OUT="$STATE/out"
 mkdir -p "$STATE"
 
-if [[ -z ${HOSTS//[[:space:]]/} ]]; then
-  echo "HOSTS is empty: copy .env.example to .env and fill it in" >&2; exit 1
+if [[ ! -r $SSH_DIR/config ]]; then
+  echo "No ssh config found at $SSH_DIR/config (check SSH_DIR in .env)" >&2; exit 1
 fi
 
-SSH_OPTS=(-o BatchMode=yes -o "ConnectTimeout=$CONNECT_TIMEOUT"
-          -o StrictHostKeyChecking=accept-new
-          -o "UserKnownHostsFile=$STATE/known_hosts /root/.ssh/known_hosts")
-PSSH_OPTS=()
-for o in "${SSH_OPTS[@]}"; do [[ $o == -o ]] || PSSH_OPTS+=(-O "$o"); done
+# print every concrete Host alias of an ssh config file, following Include
+parse_config() {
+  local kw rest h p g
+  while read -r kw rest; do
+    case ${kw,,} in
+      host)
+        set -f
+        for h in $rest; do [[ $h == *[*?!]* ]] || echo "$h"; done
+        set +f ;;
+      include)
+        for p in $rest; do
+          p=${p/#\~/\/root}
+          [[ $p == /* ]] || p=$SSH_DIR/$p
+          for g in $p; do [[ -f $g ]] && parse_config "$g"; done
+        done ;;
+    esac
+  done < <(sed -e 's/#.*//' -e 's/=/ /' "$1")
+}
 
-# build host list. parallel-ssh lowercases names, so we do the same.
-for e in $HOSTS; do
-  e=${e,,}
-  if [[ $e == *=* ]]; then
-    echo "${e#*=} ${e%%=*}" >> /etc/hosts
-    echo "${e%%=*}"
-  else
-    echo "$e"
-  fi
-done | awk '!seen[$0]++' > "$HOSTFILE"
+# parallel-ssh lowercases host names, while ssh config "Host" matching is case-sensitive:
+# for mixed-case aliases we write a lowercase alias with the same effective settings.
+: > "$SSHCFG"
+declare -A seen
+excl=" ${EXCLUDE,,} "
+for alias in $(parse_config "$SSH_DIR/config"); do
+  lc=${alias,,}
+  [[ $excl == *" $lc "* ]] && continue
+  eff=$(ssh -G "$alias" 2>/dev/null) || continue
+  key=$(awk '$1=="user"{u=$2} $1=="hostname"{h=$2} $1=="port"{p=$2} END{print u"@"h":"p}' <<<"$eff")
+  [[ -n ${seen[$key]} ]] && continue          # same machine under another alias
+  seen[$key]=1
+  if [[ $alias != "$lc" ]]; then
+    echo "Host $lc"
+    awk '$1~/^(hostname|user|port|identityfile|proxyjump|identitiesonly)$/ && $2!="none" {print "  "$0}' <<<"$eff"
+  fi >> "$SSHCFG"
+  echo "$lc"
+done > "$HOSTFILE"
+printf 'Match all\nInclude %s/config\n' "$SSH_DIR" >> "$SSHCFG"
+
+if [[ ! -s $HOSTFILE ]]; then
+  echo "No hosts found in $SSH_DIR/config" >&2; exit 1
+fi
+
+SSH_OPTS=(-F "$SSHCFG" -o BatchMode=yes -o "ConnectTimeout=$CONNECT_TIMEOUT"
+          -o StrictHostKeyChecking=accept-new
+          -o "UserKnownHostsFile=$STATE/known_hosts $SSH_DIR/known_hosts")
+PSSH_OPTS=(-x "-F $SSHCFG")
+for o in "${SSH_OPTS[@]:2}"; do [[ $o == -o ]] || PSSH_OPTS+=(-O "$o"); done
 
 run_apt_update() {
   whiptail --title "Updating" --infobox "apt update on $(wc -l < "$HOSTFILE") hosts, please wait..." 8 78
@@ -67,7 +104,7 @@ while read -r h; do
 done < "$HOSTFILE"
 
 if [[ -n $unreachable ]]; then
-  whiptail --title "Unreachable hosts" --msgbox "These hosts did not answer (down, DNS, or host key):\n\n$(echo "$unreachable" | tr '\n' ' ')" 14 80
+  whiptail --title "Unreachable hosts" --msgbox "These hosts did not answer (down, DNS, or host key).\nAdd them to EXCLUDE in .env or remove them from your ssh config:\n\n$(echo "$unreachable" | tr '\n' ' ')" 16 80
 fi
 
 if [[ ${#arr[@]} -eq 0 ]]; then

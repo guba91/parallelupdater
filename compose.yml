@@ -8,7 +8,7 @@ services:
     environment:
       - TERM=xterm
     volumes:
-      - ${SSH_DIR:-~/.ssh}:/root/.ssh:ro
+      - ${SSH_DIR:?set SSH_DIR in .env}:/root/.ssh:ro
       - data:/data
 
 volumes:
