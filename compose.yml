@@ -1,0 +1,15 @@
+services:
+  parallelupdater:
+    build: .
+    image: parallelupdater
+    env_file: .env
+    stdin_open: true
+    tty: true
+    environment:
+      - TERM=xterm
+    volumes:
+      - ${SSH_DIR:-~/.ssh}:/root/.ssh:ro
+      - data:/data
+
+volumes:
+  data:

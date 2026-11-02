@@ -1,10 +1,10 @@
-FROM debian:latest
+FROM debian:trixie-slim
 
-RUN apt update && apt upgrade -y && apt install whiptail pssh openssh-client expect dialog -y && rm -rf /var/lib/apt/lists/*
-RUN mkdir /app
-RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends whiptail pssh openssh-client \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY parallelupdater /app/parallelupdater
-
 WORKDIR /app
-CMD ["bash", "parallelupdater"]
+VOLUME /data
+ENTRYPOINT ["bash", "/app/parallelupdater"]

@@ -1,90 +1,94 @@
 #!/bin/bash
-cat /root/my_hosts >> /etc/hosts
-mkdir -p ./ggupdate
-touch ./ggupdate/aggiornamenti.txt
-touch ./ggupdate/aggiornabili.txt
+# parallelupdater - apt update/upgrade many Debian/Ubuntu hosts via parallel-ssh + whiptail
+#
+# Configuration comes from environment variables (see .env.example):
+#   HOSTS                 whitespace/newline separated list. "name" is resolved via ssh config,
+#                         "name=ip" is added to the container's /etc/hosts.
+#   APT_UPDATE_MAX_AGE    minutes before a new "apt update" is run automatically (default 60)
+#   CONNECT_TIMEOUT       ssh connect timeout in seconds (default 5)
+#   UPGRADE_CMD           command run on the chosen host (default "apt-get upgrade -y")
+# Mounts: /root/.ssh (ssh config + key, read-only), /data (persistent state).
 
+STATE=${STATE:-/data}
+APT_UPDATE_MAX_AGE=${APT_UPDATE_MAX_AGE:-60}
+CONNECT_TIMEOUT=${CONNECT_TIMEOUT:-5}
+UPGRADE_CMD=${UPGRADE_CMD:-apt-get upgrade -y}
+HOSTFILE="$STATE/hosts_name"
+OUT="$STATE/out"
+mkdir -p "$STATE"
 
-cat /root/my_hosts | awk '{print $2}' | sed -e '1,7d' > ./ggupdate/hosts_name
-{
-   while read arg; do ssh-keyscan -H $arg >> ~/.ssh/known_hosts; done < ./ggupdate/hosts_name
-} | whiptail --title "ssh-keyscan" --gauge "Please wait while populating known_hosts." 8 78 0
-    
-#let's find out if it was a rerun or a new run
-if [[ $1 != "again" ]]; then
-  if [[ ! -e ./ggupdate/whenupdated || $(find ./ggupdate/whenupdated -mmin +60 -print) ]]; then
-    # echo "last update not in an hour, let me update everything"
-    #whiptail --title "Updating" --infobox "Please wait, apt update of every host." 8 78
-    # send apt update on every hosts in "hosts_name"
-    {
-    parallel-ssh -h ./ggupdate/hosts_name "apt update > /dev/null 2>&1" > /dev/null 2>&1
-    } | whiptail --title "Updating" --gauge "Please wait, apt update of every host." 8 78 0
-    
-    # touch the file to know when this happened
-    touch ./ggupdate/whenupdated
+if [[ -z ${HOSTS//[[:space:]]/} ]]; then
+  echo "HOSTS is empty: copy .env.example to .env and fill it in" >&2; exit 1
+fi
+
+SSH_OPTS=(-o BatchMode=yes -o "ConnectTimeout=$CONNECT_TIMEOUT"
+          -o StrictHostKeyChecking=accept-new
+          -o "UserKnownHostsFile=$STATE/known_hosts /root/.ssh/known_hosts")
+PSSH_OPTS=()
+for o in "${SSH_OPTS[@]}"; do [[ $o == -o ]] || PSSH_OPTS+=(-O "$o"); done
+
+# build host list. parallel-ssh lowercases names, so we do the same.
+for e in $HOSTS; do
+  e=${e,,}
+  if [[ $e == *=* ]]; then
+    echo "${e#*=} ${e%%=*}" >> /etc/hosts
+    echo "${e%%=*}"
   else
-    # last update less than 1 hour ago
-    if (whiptail --title "Updating" --yesno "No apt update needed, last in the previous hour.\nDo it anyway?" 20 120 --scrolltext 3>&1 1>&2 2>&3); then
-      whiptail --title "Updating" --infobox "Please wait, apt update of every host." 8 78
-      {
-        parallel-ssh -h ./ggupdate/hosts_name "apt update > /dev/null 2>&1" > /dev/null 2>&1
-      } | whiptail --title "Updating" --gauge "Please wait, apt update of every host." 8 78 0
-      touch ./ggupdate/whenupdated
-    fi
+    echo "$e"
+  fi
+done | awk '!seen[$0]++' > "$HOSTFILE"
+
+run_apt_update() {
+  whiptail --title "Updating" --infobox "apt update on $(wc -l < "$HOSTFILE") hosts, please wait..." 8 78
+  parallel-ssh -t 300 "${PSSH_OPTS[@]}" -h "$HOSTFILE" "apt-get update -qq >/dev/null 2>&1" >/dev/null 2>&1
+  touch "$STATE/whenupdated"
+}
+
+if [[ $1 != "again" ]]; then
+  if [[ ! -e $STATE/whenupdated || -n $(find "$STATE/whenupdated" -mmin +"$APT_UPDATE_MAX_AGE") ]]; then
+    run_apt_update
+  elif whiptail --title "Updating" --yesno "Last apt update less than $APT_UPDATE_MAX_AGE minutes ago.\nDo it anyway?" 10 60; then
+    run_apt_update
   fi
 fi
 
+whiptail --title "Updating list" --infobox "Collecting upgradable packages..." 8 78
+rm -rf "$OUT"; mkdir -p "$OUT"
+# remote always exits 0 when reachable, so FAILURE == unreachable / auth problem
+parallel-ssh -t 60 "${PSSH_OPTS[@]}" -h "$HOSTFILE" -o "$OUT" \
+  "apt list --upgradable 2>/dev/null | grep upgradable || true" > "$STATE/pssh.log" 2>&1
 
-
-
-{
-unbuffer parallel-ssh --inline-stdout -h ./ggupdate/hosts_name "apt list --upgradable | grep -e SUCCESS -e upgradable" | grep -e SUCCESS -e upgradable --color=auto > ./ggupdate/aggiornamenti.txt
-} | whiptail --title "Updating List" --gauge "Please wait, refreshing list" 8 78 0
-
-
-#whiptail --title "Updating list" --infobox "Please wait, creating upgradable hosts list" 8 78
-
-# creating the list of the hosts that can be update
-# create file aggiornabili.txt with the list of the servers that can be update
-
-cat ./ggupdate/aggiornamenti.txt | grep SUCCESS --color=auto | awk '{print $NF}' > ./ggupdate/aggiornabili.txt
-
-
-# creating array with servers that can be update
+unreachable=$(grep FAILURE "$STATE/pssh.log" | sed 's/\x1b\[[0-9;]*m//g' | awk '{print $4}' | sort -u)
 
 arr=()
-while IFS= read -r line; do
-   arr+=("$line")
-   arr+=("")
-done <./ggupdate/aggiornabili.txt
+while read -r h; do
+  n=$(grep -c upgradable "$OUT/$h" 2>/dev/null)
+  [[ ${n:-0} -gt 0 ]] && arr+=("$h" "$n packages")
+done < "$HOSTFILE"
 
-if [ -s ./ggupdate/aggiornabili.txt ]; then
-  # The file is not-empty, so there is at least 1 host to update
-
-  #select a host to update
-  thathost=$(whiptail --title "What to update" --menu "Choose an option" 25 78 16 "${arr[@]}" 3>&1 1>&2 2>&3)
-
-  if ! [ -z "${thathost}" ]; then #if thathost is selected
-    # create the list of packages to be updated for the selected hosts
-    mapfile -t my_array < <( parallel-ssh --inline-stdout -H $thathost "apt list --upgradable | grep upgradable" )
-
-    # remove the first line that contain the hostname of the selected hosts
-    my_array=("${my_array[@]:1}")
-
-    # create a string with CR from the array
-    list=$( IFS=$'\n'; echo "${my_array[*]}" )
-
-    if (whiptail --title "Available Update" --yesno "$list" 20 120 --scrolltext 3>&1 1>&2 2>&3); then
-      ssh -t root@${thathost} screen 'apt upgrade -y'
-    fi
-  fi
-  if (whiptail --title "What now?" --yesno "Star Over?" 20 120 --scrolltext 3>&1 1>&2 2>&3); then
-    bash parallelupdater again
-  fi
-
-else
-  # The file is empty so there is no update to do
-  whiptail --title "The End" --msgbox "No update available" 12 80
+if [[ -n $unreachable ]]; then
+  whiptail --title "Unreachable hosts" --msgbox "These hosts did not answer (down, DNS, or host key):\n\n$(echo "$unreachable" | tr '\n' ' ')" 14 80
 fi
 
+if [[ ${#arr[@]} -eq 0 ]]; then
+  whiptail --title "The End" --msgbox "No update available" 10 60
+  clear; exit 0
+fi
+
+thathost=$(whiptail --title "What to update" --menu "Choose a host" 25 78 16 "${arr[@]}" 3>&1 1>&2 2>&3)
+
+if [[ -n $thathost ]]; then
+  list=$(cut -d' ' -f1-2 "$OUT/$thathost")
+  if whiptail --title "Available updates on $thathost" --yesno "$list" 25 120 --scrolltext; then
+    clear
+    # run inside screen if available so a dropped connection doesn't kill the upgrade
+    ssh -t "${SSH_OPTS[@]}" "$thathost" \
+      "if command -v screen >/dev/null; then screen $UPGRADE_CMD; else $UPGRADE_CMD; fi"
+    read -rp "Press Enter to continue..."
+  fi
+fi
+
+if whiptail --title "What now?" --yesno "Start over?" 10 60; then
+  exec bash "$0" again
+fi
 clear
